@@ -1,0 +1,669 @@
+---
+title: "VPAP Data Wrangling"
+output: html_notebook
+author: "George P. Tryfiates"
+date: "3 Dec. 2020"
+---
+
+```{r setup, include=FALSE}
+#multicollinearity
+library(GGally)
+library(mctest)
+library(corpcor)
+library(ggfortify)
+library(ggrepel)
+library(AER)
+library(tidyverse)
+#library(summariser)
+#don't rly need summariser
+library(summarytools)
+library(estimatr)
+library(readxl)
+library(plm) 
+#panel data
+library(stargazer) 
+#we prolly only need jtoools
+library(magrittr) 
+#pipe data^. mutating data (create interaction variable)
+library(janitor)
+#broom- allows you to change the case of all the variables
+library(moderndive)
+#little more versatile internally, but not very pretty
+library(jtools)
+#"journal tools" regression output pretty
+library(huxtable)
+library(readxl)
+library(flextable)
+library(RColorBrewer)
+library(ggthemes)
+```
+
+```{r echo=FALSE}
+setwd("C:/Users/seeuo/Documents/VPAP")
+```
+
+## Methodology
+This file is to demonstrate my process for importing, cleaning, wrangling, and exporting data. I looked for tags in the employer and industry variables that could be combined ("Fire Dept" and "Fire Department") by making a frequency table of observations or a barplot. I would then filter the observations and view the selection. While filtering, I mostly used dplyr piping and filter function as well as regular expression commands. After verifying a filtered selection was appropriate, I would reassign the tag to properly consolidate duplicates.
+
+## Read the CSV
+```{r}
+dat = read_csv("VPAP_SpotsyDonors_2015_2020_Dec_2.csv")
+```
+
+Saving a copy in case I ruin this dataframe.
+```{r}
+dat2 <- dat
+```
+
+## Viewing Summary Table
+```{r}
+view(dfSummary(dat))
+```
+
+## Descriptive Statistics
+```{r}
+descr(dat)
+```
+Like me, you may have noticed that the minimum value for donation_amount is -2000 which is surprising. 
+
+```{r}
+dat %>% filter(donation_amount < 1) %>% select(donor, donation_amount, url)
+```
+If you follow the url's, you can see that these donations are listed as "loans." Investigating, one will discover that they donated earlier to the cadidate committee apparantly as a "loan" and these negative donations are partial loan repayments. These are repayments to candidates or members of their households made after their respective election day.
+
+Some had multiple repayments from the candidate committees. I summed these donations to make a barplot.
+```{r}
+dat %>% group_by(donor) %>% filter(donation_amount <0 ) %>% summarise(sum = sum(donation_amount)) -> donation_barplot
+
+dat %>% group_by(donor) %>% filter(donation_amount <0 ) %>% summarise(sum = sum(donation_amount)) 
+```
+
+
+```{r}
+donation_barplot %>% ggplot(., aes(y=reorder(donor, -sum), x=sum)) + geom_col() + geom_text(aes(label=sum), hjust=1.1) + expand_limits(x=-4200) + ggtitle("\'Donation Repayments\', 2015 - 2020") + 
+  ylab("Donor") + xlab("Sum of Repayments")
+```
+
+#Count of Employer
+```{r}
+freq(dat$employer)
+```
+
+## Cleaning Duplicates in Employer
+I looked at the frequency table and tried to find duplicates and names that could be combined.
+I would then view a filtered selection of tags that could be cosolodated to verify the accuracy of the filter. Finally, I would reassign the property.
+
+For example, some listed employer as "Self", "self", "Self Employed" or other variations. I reassigned all these as "Self-Employed."
+
+Herein, I view observations that include "Self" in their listed employer.
+```{r}
+dat %>% filter(grepl("Self", employer, ignore.case = TRUE))
+```
+
+Seeing that the filter is appropriate, I reassigned the tag.
+```{r}
+dat$employer[dat$employer=="Self"]<-"Self-Employed"
+``` 
+
+I repeated this process for variations that also indicate that the donor is self-employed.
+```{r}
+dat%>%filter(employer=="self")
+```
+
+```{r}
+dat$employer[dat$employer=="self"]<-"Self-Employed"
+```
+
+```{r}
+dat$employer[dat$employer=="self employed"] <-"Self-Employed"
+```
+
+```{r}
+dat$employer[dat$employer=="Self Employed"] <-"Self-Employed"
+```
+
+```{r}
+dat$employer[dat$employer=="Self employed"] <- "Self-Employed"
+```
+
+I continued this process for other duplicates: first viewing the selection and then adding the assignment.
+```{r}
+dat$employer[dat$employer=="Spotsylvania parks and recreation"]<-"Spotsylvania Parks and Recreation"
+```
+
+```{r}
+dat$employer[dat$employer=="Spotsylvania Parks And Rec"] <-"Spotsylvania Parks and Recreation"
+```
+
+```{r}
+dat$employer[dat$employer=="Spotyslvania Sheriffs Office"] <- "Spotsylvania Sheriffs Office"
+```
+
+```{r}
+dat$employer[dat$employer=="Spotsylvania Sheriffs Office"] <- "Spotsylvania County Sheriff's Office"
+```
+
+```{r}
+dat$employer[dat$employer=="Spotsylvania County Sheriffs Office"] <- "Spotsylvania County Sheriff's Office"
+```
+
+```{r}
+dat$employer[dat$employer=="Spotslyvania County"] <- "Spotsylvania County"
+```
+
+```{r}
+dat$employer[dat$employer=="City Of Fredericksburg"] <- "City of Fredericksburg"
+```
+
+```{r}
+dat$employer[dat$employer=="CACI"] <- "CACI International Inc."
+```
+
+```{r}
+dat$employer[dat$employer=="CACI International INC"] <- "CACI International Inc."
+```
+
+```{r}
+dat$employer[dat$employer=="Stafford Co Schools"] <- "Stafford County Schools"
+```
+
+## State Tangent
+
+The individual lives in Spotsy, donated to a Spotsy candidate, and lists "State Employees" as industry.
+```{r}
+dat %>% filter(employer == "State")
+```
+
+I looked into the campaign finance report and turns out that it's just as all over the place as you fear. Multiple people in the report list "State" as their employer and "Management" as their industry but VPAP put "State Employee" or nothing for their industry.
+
+Looking for Lisa Allen, I ran this filter with regular expressions.
+```{r}
+dat%>%filter(grepl("Allen", donor))
+```
+
+As one can see, there is a serious lack of consistency in the labeling of employer and industry for donors. Allen Payne was the only donor in this selection that did not make me doubt the data collection methods of VPAP and the State Board of Elections. 
+
+I'm hoping with this project to highlight that campaign finance data should be easily accessible in an analysis ready form. Ensuring the quality of the data is necessary to that end. Furthermore, listing donors' mailing addresses seems extremely unwise.
+
+The current data reporting by the VA State Board of Elections enables targeted harrassment of individuals while preventing analysis of industry trends and guarding large donations from public scrutiny within the complexity of their API.
+
+I can't find any campaign finnce reports on the State Board of Elections website for years prior 2012.
+
+VA is ranked 5th worst on the S.W.A.M.P. Index.
+
+Anyway, from those campaign finance reports where "State" was listed as the employer, the employer's address was listed a Richmond, VA. I concluded that there employer was thus the Commonwealth of Virginia. I also decided not to spend 20 minutes digging into campaign finance reports for a small number of observations.
+
+```{r}
+dat$employer[dat$employer == "State"] <- "Commonwealth of Virginia"
+```
+
+```{r}
+dat$employer[dat$employer=="DOD"] <- "Department of Defense"
+```
+
+```{r}
+dat$employer[dat$employer=="Department of Defense"] <- "US Department of Defense"
+```
+
+```{r}
+dat$employer[dat$employer=="Mell & Frost"] <- "Mell & Frost Attorneys"
+```
+
+This guy is a dentist but his employer is listed as "xxx" causing me to panic about my webscraper again. Thankfully, that was not the case--VPAP actually listed "xxx" as his employer.
+```{r}
+dat$employer[dat$employer=="xxx"] <- "Employer Unknown"
+```
+
+```{r}
+dat$employer[dat$employer=="Marine Corp Quantico"] <- "USMC"
+```
+
+```{r}
+dat$employer[dat$employer=="Rappahannock County Jail"] <- "Rappahannock Regional Jail"
+```
+
+```{r}
+dat$employer[dat$employer=="Rappahannock Jail"] <- "Rappahannock Regional Jail"
+```
+
+```{r}
+dat$employer[dat$employer=="Find It At Freds"] <- "Find It At Freds Antique & Thrift Store"
+```
+
+```{r}
+dat$employer[dat$employer=="SAIC"] <- "Science Applications International Corporation (SAIC)"
+```
+
+```{r}
+dat$employer[dat$employer=="FBI"] <- "Federal Bureau of Investigation"
+```
+
+```{r}
+dat$employer[dat$employer=="UMW"] <- "University of Mary Washington"
+```
+
+```{r}
+dat$employer[dat$employer=="Stafford Sherif"] <- "Stafford County Sheriff's Office"
+dat$employer[dat$employer=="Stafford Sheriff"] <- "Stafford County Sheriff's Office"
+dat$employer[dat$employer=="Stafford Sheriffs Office"] <- "Stafford County Sheriff's Office"
+```
+
+```{r}
+dat$employer[dat$employer=="Arlington"] <- "Arlington County"
+```
+
+```{r}
+dat$employer[dat$employer == "Fredericksburg City"] <- "City of Fredericksburg"
+```
+
+```{r}
+dat$employer[dat$employer=="Employer Unknown" & dat$industry=="Retired"] <- "Retired"
+```
+
+## Stone Berry and its Dissidents
+I wandered down another investigative tangent.
+
+Vivica Berry lists "Stone-Berry Enterprise" as "Artists/Authors"
+```{r}
+dat %>% filter(employer == "Stone-Berry Enterprise")
+```
+
+Moses Berry lists "Stone Berry Enterprises" as "Farmers". They donate during the same period to the same candidates.
+```{r}
+dat %>% filter(employer=="Stone Berry Enterprises")
+```
+
+And "Stone-Berry Enterprises" itself is a donor.
+```{r}
+dat %>% filter(donor=="Stone-Berry Enterprises")
+```
+
+After limited search results, I arbitrarily decided that "Stone Berry Enterprises" was prettier--trying to verify the legal name of this corporation is irrelevant to this project.
+```{r}
+dat$employer[dat$employer == "Stone-Berry Enterprise"] <- "Stone Berry Enterprises"
+dat$donor[dat$donor == "Stone-Berry Enterprises"] <- "Stone Berry Enterprises"
+```
+
+I tried various filters to view corporations/committees but I struggled to find the correct constraints.
+```{r}
+dat %>% filter(employer == "Employer Unknown", industry != "Retired", industry != "Non-Wage Earners")
+```
+
+However, using regex to filter for individual donors by looking for a comma proved effective.
+```{r}
+dat %>% filter(grepl(",", donor))
+```
+
+Corporations/Committees/Clubs do not have a "," and I verified that no individual donors appeared in this selection:
+```{r}
+dat %>% filter(!grepl(",", donor))
+```
+
+Selecting the employers of corporations/committees:
+```{r}
+dat$employer[!grepl(",", dat$donor)]
+```
+
+Who is LINBOUND and why are they ruining this for me?
+```{r}
+dat %>% filter(employer == "LINBOUND Enterprises LLC")
+```
+
+I should be able to check this in a df but I failed to... oh, well... doing it the hard way
+```{r}
+dat$donor[!grepl(",", dat$donor)] -> corp
+```
+
+LINBOUND has given me the idea that perhaps listing the donor organization as the employer would give the organization the proper weight amongst employers... or perhaps these bad boys deserve their own dataframe...
+
+Replacing the corporations "employer" from "Employer Unknown" to the corporation's name and saving that as a variable
+```{r}
+ifelse(dat2$donor %in% corp, dat$donor, dat$employer) -> employer2
+```
+
+dropping the old employer variable from the dataframe, adding the new employer variable, saving it as a new dataframe
+```{r}
+dat2 %>% select(-employer) %>% mutate(employer2) ->dat3
+```
+
+Viewing the donor and new employer variable
+```{r}
+dat3 %>% select(donor, employer2)
+```
+
+
+it worked.
+```{r}
+dat3 %>% filter(!grepl(",", dat3$donor)) %>% select(donor, employer2)
+```
+
+### Largest Donors
+```{r}
+dat3 %>% group_by(donor) %>% summarise(donation_amount_total = sum(donation_amount)) -> dat_barplot
+dat_barplot %>% arrange(desc(donation_amount_total))
+```
+
+top_n() also works instead of arrange(desc()) %>% slice()
+```{r}
+dat_barplot %>% arrange(desc(donation_amount_total)) %>% slice(1:10) %>%
+  ggplot(., aes(x=donation_amount_total, y=reorder(donor, donation_amount_total))) + geom_col() +
+  xlab("Total Donations ($'s)") +
+  ylab("Donors") +
+  ggtitle("Largest Donors in Spotsy, 2015-2020") +
+  geom_text(aes(label=donation_amount_total), col='white', hjust = 1.1, size=3.5)+
+  theme_excel()
+```
+
+## Top Donation Recipients
+```{r}
+dat3 %>% group_by(recipient) %>% summarise(donation_amount_total = sum(donation_amount)) -> dat_barplot2
+```
+
+```{r fig.height=6, fig.width=10}
+dat_barplot2 %>% arrange(desc(donation_amount_total)) %>% slice(1:10) %>%
+  ggplot(., aes(x=donation_amount_total, y=reorder(recipient, donation_amount_total))) + geom_col() +
+  xlab("Total Donations ($'s)") +
+  ylab("Recipients") +
+  ggtitle("Top 10 Donation Recipients in Spotsylvania, 2015-2020") +
+  geom_text(aes(label=donation_amount_total), col='white', hjust = 1.1, size = 3.5)+
+  theme_excel()+
+  expand_limits(x=80000)+
+  theme(plot.title.position = 'plot')
+#ggsave('TopRecipients.png', height = 6, width = 10)
+```
+
+## Most Frequently Listed Employers
+
+Excluding "Employer Unknown" and adding a count of employer2
+```{r}
+dat3 %>% filter(!grepl("Unknown", employer2)) %>% count(employer2) -> dat_barplot3
+```
+
+Selecting just the employer name and the count
+```{r}
+dat_barplot3 %<>% select(employer2, "count"=n)
+```
+
+Barplot of the 11 most frequently listed employers excluding the unknown
+```{r fig.height=5.5, warning=FALSE}
+dat_barplot3 %>% arrange(desc(count)) %>% slice(1:11) %>%
+  ggplot(., aes(y=reorder(employer2, count), x=count)) + geom_col() + geom_text(aes(label=count), hjust= -0.5)+expand_limits(x=140)+
+  ylab("Employer") + xlab("Count")+ ggtitle("Most Frequently Listed Employers", subtitle = "Employer Unknown Excluded") + theme(plot.title.position = "plot")
+```
+
+## Industry Cleaning
+This was just a mess. Some of the categories were clearly created and cleaned by VPAP but some were obviously not. I first made the graph at the bottom and then would examine which categories could be added/combined. Once I noticed an action I could take, I wrote the retrieval part of the command (left of "<-") and would run it to ensure I was not grabbing the wrong records. When I verified these were the correct industries to overwrite, I would run the command with the assignment.
+
+
+```{r}
+dat3$industry[grepl("Retail", dat3$industry)] <- 'Retail'
+```
+
+Making an auto industry
+```{r}
+dat3$industry[grepl('Auto', dat3$industry)] <- 'Automobile'
+```
+
+Making a legal industry
+```{r}
+dat3$industry[grepl('Lawyer', dat3$industry)] <- 'Legal'
+```
+
+combining
+```{r}
+dat3$industry[grepl('Attorney', dat3$industry)] <- 'Legal'
+```
+
+```{r}
+dat3$industry[grepl('Republican', dat3$industry)] <- 'Republican Advocacy'
+```
+
+```{r}
+dat3$industry[grepl('Democrat', dat3$industry)] <- 'Democrat Advocacy'
+```
+
+```{r}
+dat3$industry[grepl('Information', dat3$industry)] <- 'Information Technology'
+```
+
+```{r}
+dat3$industry[grepl('Teachers', dat3$industry)] <- 'Education'
+```
+
+```{r}
+dat3$industry[grepl('Students', dat3$industry)] <- 'Education'
+```
+
+```{r}
+dat3$industry[grepl('School', dat3$industry)] <- 'Education'
+```
+
+```{r}
+dat3$industry[grepl('Build', dat3$industry)] <- 'Construction'
+```
+
+```{r}
+dat3$industry[grepl('Construct', dat3$industry)] <- 'Construction'
+```
+
+```{r}
+dat3$industry[grepl('Real', dat3$industry)] <- 'Real Estate'
+```
+
+```{r}
+dat3$industry[grepl('Contractor', dat3$industry)] <- 'Construction'
+```
+
+```{r}
+dat3$industry[grepl('Nurses', dat3$industry)] <- "Healthcare"
+```
+
+```{r}
+dat3$industry[grepl('Health', dat3$industry)] <- "Healthcare"
+```
+
+```{r}
+dat3$industry[grepl('Nursing', dat3$industry)] <- "Healthcare"
+```
+
+```{r}
+dat3$industry[grepl('Physic', dat3$industry)] <- "Healthcare"
+```
+
+```{r}
+dat3$industry[grepl('Bank', dat3$industry)] <- "Financial"
+```
+
+```{r}
+dat3$industry[grepl('Dent', dat3$industry)] <- "Healthcare"
+```
+
+```{r}
+dat3$industry[grepl('build', dat3$industry)] <- "Construction"
+```
+
+```{r}
+dat3$industry[grepl('College', dat3$industry)] <- "Education"
+```
+
+```{r}
+dat3$industry[grepl('Energy', dat3$industry, ignore.case = TRUE)] <- "Energy"
+```
+
+```{r}
+dat3$industry[grepl('Fuel', dat3$industry, ignore.case = TRUE)] <- "Energy"
+```
+
+```{r}
+dat3$industry[grepl('Financ', dat3$industry, ignore.case = TRUE)] <- "Financial"
+```
+
+```{r}
+dat3$industry[grepl('Rent', dat3$industry, ignore.case = TRUE)] <- "Real Estate"
+```
+
+```{r}
+dat3$industry[grepl('insurance', dat3$industry, ignore.case = TRUE)] <- "Insurance"
+```
+
+```{r}
+dat3$industry[grepl('mort', dat3$industry, ignore.case = TRUE)] <- "Financial"
+```
+
+```{r}
+dat3$industry[grepl('util', dat3$industry, ignore.case = TRUE)] <- "Energy"
+```
+
+```{r}
+dat3$industry[grepl('Alc', dat3$industry, ignore.case = TRUE)] <- "Alcohol"
+```
+
+```{r}
+dat3$industry[grepl('Eng', dat3$industry, ignore.case = TRUE)] <- "Engineering"
+```
+
+```{r}
+dat3$industry[grepl('farmer', dat3$industry, ignore.case = TRUE)] <- "Farming"
+```
+
+```{r}
+dat3$industry[grepl('farm supply', dat3$industry, ignore.case = TRUE)] <- "Farming"
+```
+
+```{r}
+dat3$industry[grepl('chir', dat3$industry, ignore.case = TRUE)] <- "Healthcare"
+```
+
+```{r}
+dat3$industry[grepl('account', dat3$industry, ignore.case = TRUE)] <- "Financial"
+```
+
+```{r}
+dat3$industry[grepl('inv', dat3$industry, ignore.case = TRUE)] <- "Financial"
+```
+
+```{r}
+dat3$industry[grepl('title', dat3$industry, ignore.case = TRUE)] <- "Real Estate"
+```
+
+```{r}
+dat3$industry[grepl('import', dat3$industry, ignore.case = TRUE)] <-"Transportation/Logistics"
+```
+
+```{r}
+dat3$industry[grepl('truck', dat3$industry, ignore.case = TRUE)] <- "Transportation/Logistics"
+```
+
+```{r}
+dat3$industry[grepl('trans', dat3$industry, ignore.case = TRUE)] <-"Transportation/Logistics"
+```
+
+```{r}
+dat3$industry[grepl('ware', dat3$industry, ignore.case = TRUE)] <- "Transportation/Logistics"
+```
+
+```{r}
+dat3$industry[grepl('church', dat3$industry, ignore.case = TRUE)] <- "Religion"
+```
+
+```{r}
+dat3$industry[grepl('defense', dat3$industry, ignore.case = TRUE)] <- "Military/Defense"
+```
+
+```{r}
+dat3$industry[grepl('homeland', dat3$industry, ignore.case = TRUE)] <- "Military/Defense"
+```
+
+```{r}
+dat3$industry[grepl('tv', dat3$industry, ignore.case = TRUE)] <- "Entertainment"
+```
+
+```{r}
+dat3$industry[grepl('radio', dat3$industry, ignore.case = TRUE)] <- "Entertainment"
+```
+
+```{r}
+dat3$industry[grepl('art', dat3$industry, ignore.case = TRUE)] <- "Entertainment"
+```
+
+```{r}
+dat3$industry[grepl('movie', dat3$industry, ignore.case = TRUE)] <- "Entertainment"
+```
+
+```{r}
+dat3$industry[grepl('single', dat3$industry, ignore.case = TRUE)] <- "Political Advocacy"
+```
+
+```{r}
+dat3$industry[grepl('commun', dat3$industry, ignore.case = TRUE)] <- "Communications"
+```
+
+```{r}
+dat3$industry[grepl('tele', dat3$industry, ignore.case = TRUE)] <- "Communications"
+```
+
+```{r}
+dat3$industry[grepl('waste', dat3$industry, ignore.case = TRUE)] <- "Waste Disposal/Recycling"
+```
+
+```{r}
+dat3$industry[grepl('recy', dat3$industry, ignore.case = TRUE)] <- "Waste Disposal/Recycling"
+```
+
+```{r}
+dat3$industry[grepl('state employee', dat3$industry, ignore.case = TRUE)] <- "State Government Employees"
+```
+
+```{r}
+dat3$industry[grepl('gun', dat3$industry, ignore.case = TRUE)] <- "Guns"
+```
+
+```{r}
+dat3$employer2[grepl('sales', dat3$industry, ignore.case = TRUE)]
+```
+they sell a disinfectant so... 
+
+```{r}
+dat3$industry[grepl('sales', dat3$industry, ignore.case = TRUE)] <- "Disinfectant"
+```
+
+```{r}
+dat3$employer2[grepl('chem', dat3$industry, ignore.case = TRUE)]
+```
+They do railing and decking and products for that
+
+```{r}
+dat3$industry[grepl('chem', dat3$industry, ignore.case = TRUE)] <- "Home Improvement"
+```
+
+```{r}
+dat3$employer2[grepl('labor', dat3$industry, ignore.case = TRUE)]
+```
+
+```{r}
+dat3$industry[grepl('labor', dat3$industry, ignore.case = TRUE)] <- "Automobile"
+```
+
+```{r fig.height=16, fig.width=10}
+dat3 %>% ggplot(., aes(y=reorder(industry, industry, function(y)+length(y))))+ 
+  geom_bar() + geom_text(stat = 'count', aes(label=..count..), hjust= -0.1) +
+  xlab("Count") + ylab("Industry") + ggtitle("Industry of Donors")+ theme(plot.title.position = 'plot')
+```
+
+I rearranged the order of the variables so the dataframe would be easier to read.
+```{r}
+dat3 %>% select(date, donor, "employer"=employer2, industry, recipient, donation_amount, url) -> dat4
+```
+
+Looks good
+```{r}
+view(dfSummary(dat4))
+```
+
+### Exporting to a csv
+```{r}
+write_csv(dat4, "VPAP_Cleaned.csv")
+```
+
+
+
