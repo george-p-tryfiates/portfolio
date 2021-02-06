@@ -1,0 +1,347 @@
+---
+title: "COVID"
+author: "Tryfiates, George"
+date: "2/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Importing Libraries
+```{r}
+library(readr)
+library(summarytools)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(magrittr)
+library(janitor)
+library(readxl)
+```
+
+# Reading the VDH Data
+```{r}
+vdh <- read_csv("VDH_data.csv")
+```
+
+# Cleaning the Data
+```{r}
+vdh %<>% clean_names()
+vdh$report_date <- as.POSIXlt(strptime(vdh$report_date, format = "%m/%d/%Y"))
+```
+
+# Summarizing the Deaths by Locality for 2020
+```{r}
+vdh %>% filter(report_date == as.POSIXlt(strptime("12/31/2020", format = "%m/%d/%Y"))) %>% group_by(locality) %>% summarise(., "total_covid_deaths" = sum(deaths)) -> vdh2
+```
+# Reading 2020 Population Data Estimates
+UVA Cooper Center's Demographic Research Group releases estimates of Virginia's population broken down by county.
+```{r}
+pop_data <- read_xls("UVA_pop_data.xls", range = "B8:D140", col_names = FALSE)
+pop_overhead <- read_xls("UVA_pop_data.xls", range = "B5:D6")
+```
+
+# Cleaning the Data
+```{r}
+pop_overhead %<>% clean_names()
+names(pop_data) <- names(pop_overhead)
+```
+
+# Saving the VA total population estimate as its own variable
+```{r}
+va_total_pop <- pop_overhead$july_1_2020_estimate
+# checking that the sum of county populations equal the state total
+sum(pop_data$july_1_2020_estimate) == va_total_pop
+```
+# Sorting the DataFrames by Locality
+```{r}
+pop_data <- arrange(pop_data, pop_data$locality)
+vdh2 <- arrange(vdh2, vdh2$locality)
+```
+
+# Setting both to Lowercase
+```{r}
+vdh2$locality %<>% tolower()
+pop_data$locality %<>% tolower()
+```
+
+# Checking that the Sort matches
+```{r}
+data.frame(vdh2$locality, pop_data$locality)
+```
+
+# Reordering fairfax and fairfax city in VDH Data
+```{r}
+vdh2$locality[37]
+vdh3 <- vdh2[1:37, ]
+vdh3 %<>% add_row(vdh2[39,])
+vdh3 %<>% add_row(vdh2[38, ])
+vdh3 %<>% add_row(vdh2[40:133,])             
+```
+# Adding variable for the county's percent of the total statewide COVID-19 deaths
+```{r}
+vdh3 %<>% mutate("pct_of_total_death" = 100*(vdh3$total_covid_deaths)/sum(vdh3$total_covid_deaths))
+```
+
+# Adding a variable for the county's percent of the state's population
+```{r}
+vdh3 %<>% mutate("pct_of_total_pop" = 100*(pop_data$july_1_2020_estimate/va_total_pop))
+```
+
+# Adding a variable for percent change comparing the share of population to the share of COVID-19 deaths
+```{r}
+vdh3 %<>% mutate("pct_diff_expected_dist" = 100*((pct_of_total_death - pct_of_total_pop)/pct_of_total_pop))
+```
+
+# Viewing the Dataframe
+```{r}
+vdh3
+```
+
+# Largest Positive % Change
+```{r}
+vdh3 %>% filter(pct_diff_expected_dist > 200 )
+```
+# Largest Negative % Change 
+```{r}
+vdh3 %>% filter(pct_diff_expected_dist < -67)
+```
+# Summary of Data
+```{r}
+view(dfSummary(vdh3))
+summary(vdh3$pct_diff_expected_dist)
+```
+
+# Learning how to make a map
+```{r}
+library(maps)
+data("countyMapEnv")
+map('county', 'virginia', fill = TRUE, col = palette())
+```
+
+## Making a map With ggplot
+```{r}
+va_map <- map_data("county", "virginia")
+ggplot(data = va_map)+
+  geom_polygon(aes(x=long, y=lat, fill=subregion,  group = group), color = "black") +
+  coord_fixed(1.3)+
+  guides(fill=FALSE)
+```
+# Filtering for specific regions
+```{r}
+va_map %>% filter(subregion == "charlotte") -> charl
+ggplot(data = va_map)+
+  geom_polygon(aes(x=long, y=lat, group = group), color = "black", fill="grey") +
+  geom_polygon(data = charl, aes(x=long, y= lat, group=group), fill="pink")+
+  coord_fixed(1.3)+
+  guides(fill=FALSE)+
+  theme_nothing()
+```
+
+
+# Matching DataFrames
+```{r}
+s_region<- unique(va_map$subregion)
+setdiff(vdh3$locality, s_region)
+```
+
+```{r}
+setdiff(s_region, vdh3$locality)
+```
+Yep, these are franklin, richmond, and roanoke *county*. 
+```{r}
+va_map %>% filter(subregion == c("franklin", "richmond", "roanoke")) -> charl
+ggplot(data = va_map)+
+  geom_polygon(aes(x=long, y=lat, group = group), color = "black", fill="grey") +
+  geom_polygon(data = charl, aes(x=long, y= lat, group=group), fill="pink")+
+  coord_fixed(1.3)+
+  guides(fill=FALSE)+
+  theme_nothing()
+```
+# Editing county names to match
+```{r}
+vdh3$locality[vdh3$locality=="richmond county"] <- "richmond"
+vdh3$locality[vdh3$locality == "franklin county"] <- "franklin"
+vdh3$locality[vdh3$locality == "roanoke county"] <- "roanoke"
+```
+
+# Merging the DataFrames
+```{r}
+va_county_fill <- left_join(va_map, vdh3, by=c("subregion"="locality"))
+```
+
+# Importing Colorblind Palette
+```{r}
+library(viridis)
+```
+# Saving a Dataframe for the State Outline
+```{r}
+va_state <- map_data("state", "virginia")
+```
+
+# Visualizing the Final Data with My Variable
+```{r}
+ggplot(data = va_county_fill)+
+  labs(title = "Virginia", subtitle = "Comparing County-wise Share of COVID-19 Deaths against Share of VA Population", caption = "Data Sources: VDH + UVA Weldon Cooper Center")+
+  geom_polygon(aes(x=long, y=lat, group = group, fill=pct_diff_expected_dist), 
+               color = "white") +
+  scale_fill_viridis_b(option = "A", direction = -1, name="Percent Change")+
+  geom_polygon(data = va_state, aes(x=long, y=lat, group=group), 
+               fill=NA, color=viridis(1, begin = 0.2, alpha = 0.2))+
+  coord_fixed(1.3)+
+  theme_fivethirtyeight()+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5, face = "italic"), 
+        legend.position = c(0.08,0.62), legend.direction = "vertical",
+        legend.title = element_text(size = 10.5, face = "bold"), 
+        legend.text = element_text(size = 10, face = "italic"),
+        text = element_text(family = "sans", size = 12), panel.grid = element_blank(),
+        axis.title = element_blank(), axis.text = element_blank(),
+        axis.ticks = element_blank(), line=element_blank(), 
+        panel.grid.major = element_blank(), plot.caption = element_text(size=7)
+        )
+```
+Basically, if a county has a percent change of 100%, that means that its share of COVID-19 deaths is double its share of the Virgnia population.
+
+# Saving the Plot
+```{r}
+ggsave("VA_countywise_mortality_share_i_excess.png", dpi = 1068)
+```
+# Playing with More Colors and Alternative Text
+```{r}
+ggplot(data = va_county_fill)+
+  labs(
+    title = "Pandemic Proportionality, Virginia 2020", 
+    subtitle = 
+         "Were the county shares of statewide COVID-19 deaths proportional to its share of population?", 
+    caption = "Data Sources: VDH + UVA Weldon Cooper Center"
+    )+
+  geom_polygon(
+    aes(x=long, y=lat, group = group, fill=pct_diff_expected_dist), 
+    color = "white"
+    )+
+  scale_fill_viridis_b(
+    
+    direction = 1, 
+    name="Percent Change"
+    )+
+  geom_polygon(
+    data = va_state, 
+    aes(x=long, y=lat, group=group),
+    fill=NA, 
+    color=viridis(1, begin = 0.2, alpha = 0.2)
+    )+
+  coord_fixed(1.3)+
+  theme_fivethirtyeight()+
+  theme(
+    plot.title = element_text(hjust = 0.5), 
+    plot.subtitle = element_text(hjust=0.5, face="italic"), 
+    legend.position = c(0.08,0.62), legend.direction = "vertical",
+    legend.title = element_text(size = 10.5, face = "bold"), 
+    legend.text = element_text(size = 10, face = "italic"),
+    text = element_text(family = "sans", size = 12), 
+    panel.grid = element_blank(),
+    axis.title = element_blank(), 
+    axis.text = element_blank(),
+    axis.ticks = element_blank(), 
+    line=element_blank(), 
+    panel.grid.major = element_blank(), 
+    plot.caption = element_text(size=7)
+    )
+```
+
+```{r}
+ggsave("VA_countywise_mortality_share_x_blue_alttext.png", dpi = 1068, width = 8)
+```
+
+```{r}
+ggplot(data = va_county_fill)+
+  labs(
+    title = "Pandemic Proportionality, Virginia 2020", 
+    subtitle = 
+         "Were the county shares of statewide COVID-19 deaths proportional to its share of population?", 
+    caption = "Data Sources: VDH + UVA Weldon Cooper Center"
+    )+
+  geom_polygon(
+    aes(x=long, y=lat, group = group, fill=pct_diff_expected_dist), 
+    color = "white"
+    )+
+  scale_fill_viridis_b(
+    option = "A",
+    direction = 1, 
+    name="Percent Change"
+    )+
+  geom_polygon(
+    data = va_state, 
+    aes(x=long, y=lat, group=group),
+    fill=NA, 
+    color=viridis(1, begin = 0.2, alpha = 0.2)
+    )+
+  coord_fixed(1.3)+
+  theme_fivethirtyeight()+
+  theme(
+    plot.title = element_text(hjust = 0.5), 
+    plot.subtitle = element_text(hjust=0.5, face="italic"), 
+    legend.position = c(0.08,0.62), legend.direction = "vertical",
+    legend.title = element_text(size = 10.5, face = "bold"), 
+    legend.text = element_text(size = 10, face = "italic"),
+    text = element_text(family = "sans", size = 12), 
+    panel.grid = element_blank(),
+    axis.title = element_blank(), 
+    axis.text = element_blank(),
+    axis.ticks = element_blank(), 
+    line=element_blank(), 
+    panel.grid.major = element_blank(), 
+    plot.caption = element_text(size=7)
+    )
+```
+
+```{r}
+ggsave("VA_countywise_mortality_share_x_magma_alttext.png", dpi = 1068, width = 8)
+```
+```{r}
+ggplot(data = va_county_fill)+
+  labs(
+    title = "Pandemic Proportionality, Virginia 2020", 
+    subtitle = 
+         "Were the county shares of statewide COVID-19 deaths proportional to its share of population?", 
+    caption = "Data Sources: VDH + UVA Weldon Cooper Center"
+    )+
+  geom_polygon(
+    aes(x=long, y=lat, group = group, fill=pct_diff_expected_dist), 
+    color = "white"
+    )+
+  scale_fill_viridis_b(
+    option = "A",
+    direction = -1, 
+    name="Percent Change"
+    )+
+  geom_polygon(
+    data = va_state, 
+    aes(x=long, y=lat, group=group),
+    fill=NA, 
+    color=viridis(1, begin = 0.2, alpha = 0.2)
+    )+
+  coord_fixed(1.3)+
+  theme_fivethirtyeight()+
+  theme(
+    plot.title = element_text(hjust = 0.5), 
+    plot.subtitle = element_text(hjust=0.5, face="italic"), 
+    legend.position = c(0.08,0.62), legend.direction = "vertical",
+    legend.title = element_text(size = 10.5, face = "bold"), 
+    legend.text = element_text(size = 10, face = "italic"),
+    text = element_text(family = "sans", size = 12), 
+    panel.grid = element_blank(),
+    axis.title = element_blank(), 
+    axis.text = element_blank(),
+    axis.ticks = element_blank(), 
+    line=element_blank(), 
+    panel.grid.major = element_blank(), 
+    plot.caption = element_text(size=7)
+    )
+```
+
+```{r}
+ggsave("VA_countywise_mortality_share_x_magmalite_alttext.png", dpi = 1068, width = 8)
+```
